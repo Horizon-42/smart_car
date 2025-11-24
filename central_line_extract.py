@@ -6,6 +6,7 @@ from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import make_pipeline
 
+
 def enhance_contrast(image: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple = (8, 8)) -> np.ndarray:
     # convert to LAB color space
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -19,6 +20,7 @@ def enhance_contrast(image: np.ndarray, clip_limit: float = 2.0, tile_grid_size:
     limg = cv2.merge((cl, a, b))
     enhanced_image = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
     return enhanced_image
+
 
 def enhace_contrast_equalized(image: np.ndarray) -> np.ndarray:
     # q: why only equalize Y channel works better?
@@ -36,14 +38,17 @@ def enhace_contrast_equalized(image: np.ndarray) -> np.ndarray:
     enhanced_image = cv2.cvtColor(yuv_eq, cv2.COLOR_YUV2BGR)
     return enhanced_image
 
+
 def ehance_contrast_gamma(image: np.ndarray, gamma: float = 1.2) -> np.ndarray:
     # build a lookup table mapping the pixel values [0, 255] to their adjusted gamma values
     inv_gamma = 1.0 / gamma
-    table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+    table = np.array([((i / 255.0) ** inv_gamma) *
+                     255 for i in np.arange(0, 256)]).astype("uint8")
 
     # apply gamma correction using the lookup table
     enhanced_image = cv2.LUT(image, table)
     return enhanced_image
+
 
 def color_extract(image: np.ndarray, target_bgr_color: tuple = (255, 255, 255),
                   distance_trheshold: float = 0.1, display: bool = True) -> np.ndarray:
@@ -58,34 +63,36 @@ def color_extract(image: np.ndarray, target_bgr_color: tuple = (255, 255, 255),
     target_color_hsv[0] /= 360.0
 
     # draw h s v
-    h, s, v = cv2.split(image_hsv)
-    h /= 360.0
     if display:
-        cv2.imshow("H Channel", (h * 255).astype(np.uint8))
-        cv2.imshow("S Channel", (s * 255).astype(np.uint8))
-        cv2.imshow("V Channel", (v * 255).astype(np.uint8))
+        cv2.imshow("H Channel", (image_hsv[:, :, 0] * 255).astype(np.uint8))
+        cv2.imshow("S Channel", (image_hsv[:, :, 1] * 255).astype(np.uint8))
+        cv2.imshow("V Channel", (image_hsv[:, :, 2] * 255).astype(np.uint8))
         cv2.waitKey(0)
 
-    image_hsv[:, :, 0] /= 360.0
-
     # l1 norm distance in hsv space
+    image_hsv[:, :, 0] /= 360.0  # normalize h to [0,1]
     dh = np.abs(image_hsv[:, :, 0] - target_color_hsv[0])
     dh = np.minimum(dh, 1 - dh)  # circular distance
     ds = np.abs(image_hsv[:, :, 1] - target_color_hsv[1])
     dv = np.abs(image_hsv[:, :, 2] - target_color_hsv[2])
 
-    # distance = (dh + ds + dv) / 3.0
+    distance = (dh + ds + dv) / 3.0
     # take the max distance
-    distance = np.minimum(np.minimum(dh, ds), dv)
+    # distance = np.minimum(np.minimum(dh, ds), dv)
 
     # draw distance map
     if display:
+        cv2.imshow("H Distance", (dh * 255).astype(np.uint8))
+        cv2.imshow("S Distance", (ds * 255).astype(np.uint8))
+        cv2.imshow("V Distance", (dv * 255).astype(np.uint8))
+
         distance_map = (distance * 255).astype(np.uint8)
         cv2.imshow("Distance Map", distance_map)
         cv2.waitKey(0)
-    
+
     # print min max mean distance
-    print(f"Distance - min: {np.min(distance)}, max: {np.max(distance)}, mean: {np.mean(distance)}")
+    print(
+        f"Distance - min: {np.min(distance)}, max: {np.max(distance)}, mean: {np.mean(distance)}")
 
     # create mask
     mask = (distance < distance_trheshold).astype(np.uint8) * 255
@@ -97,7 +104,10 @@ def gradiant_extract_sobel(image: np.ndarray,
                            grad_thres_min: int = 20,
                            grad_thres_max: int = 100) -> np.ndarray:
     # convert to gray
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # convert to yuv and only take y
+    yuv = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+    gray, _, _ = cv2.split(yuv)
 
     # sobel operator
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_ksize)
@@ -171,29 +181,34 @@ def central_curve_fit_ransac(mask: np.ndarray, polynomial_order: int = 2, min_po
 
     return fit_coefficients, central_points
 
-def fit_central_curve(image:np.ndarray):
+
+def fit_central_curve(img: np.ndarray):
+    # denoise
+    image = cv2.medianBlur(img, 3)
     # enhance contrast
     # enhanced_image = enhance_contrast(image, clip_limit=4.0, tile_grid_size=(16, 16))
     enhanced_image = enhace_contrast_equalized(image)
     # enhanced_image = ehance_contrast_gamma(image, gamma=0.2)
 
     color_mask = color_extract(enhanced_image, target_bgr_color=(255, 255, 255),
-                               distance_trheshold=0.04, display=True)
+                               distance_trheshold=0.2, display=True)
 
     # dilate to fill gaps
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_DILATE, kernel)
 
-    grad_mask = gradiant_extract_sobel(image, sobel_ksize=3,
-                                       grad_thres_min=20, grad_thres_max=80)
+    gamma_image = ehance_contrast_gamma(image, gamma=0.5)
+    grad_mask = gradiant_extract_sobel(gamma_image, sobel_ksize=3,
+                                       grad_thres_min=10, grad_thres_max=80)
 
     combined_mask = cv2.bitwise_and(color_mask, grad_mask)
 
     # morphx operation, erase noise
     # vertical kernel
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15))
-    combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_ERODE, kernel)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 5))
+    combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
 
+    cv2.imshow("Gamma Image", gamma_image)
     cv2.imshow("Color Mask", color_mask)
     cv2.imshow("Gradient Mask", grad_mask)
     cv2.imshow("Combined Mask", combined_mask)
@@ -223,7 +238,8 @@ if __name__ == "__main__":
     image_path = "wraped_img.jpg"  # Replace with your image path
     image = cv2.imread(image_path)
 
-    output_image, color_mask, grad_mask, combined_mask = fit_central_curve(image)
+    output_image, color_mask, grad_mask, combined_mask = fit_central_curve(
+        image)
 
     cv2.imshow("Color Mask", color_mask)
     cv2.imshow("Gradient Mask", grad_mask)
