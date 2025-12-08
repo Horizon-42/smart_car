@@ -128,7 +128,7 @@ def pre_process(img):
     # Undistort the image
     undistorted_img = undistort_image(img_corrected)
 
-    undistorted_img = ehance_contrast_gamma(undistorted_img, gamma=0.5)
+    # undistorted_img = ehance_contrast_gamma(undistorted_img, gamma=1.5)
     
     return undistorted_img
 
