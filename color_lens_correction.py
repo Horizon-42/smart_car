@@ -73,7 +73,7 @@ def main():
         return
     
     # undistort image
-    img = undistort_image(img)
+    # img = undistort_image(img)
 
     h, w = img.shape[:2]
     r2, r4 = build_radius_maps(h, w)

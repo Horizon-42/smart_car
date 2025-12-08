@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from undistort import undistort_image
 
 def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
     """
@@ -22,6 +23,10 @@ def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
             cv2.imshow(window_name, image)
 
     image = cv2.imread(image_path)
+    
+    # undistort the image
+    image = undistort_image(image)
+
     cv2.imshow(window_name, image)
     cv2.setMouseCallback(window_name, mouse_callback)
     cv2.waitKey(0)
@@ -77,6 +82,7 @@ if __name__ == "__main__":
         yaml.dump({"selected_points": selected_points}, f)
 
     image = cv2.imread(image_path)
+    image = undistort_image(image)
 
     dst_image = (520,720)
 

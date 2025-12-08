@@ -6,6 +6,7 @@ from sklearn.linear_model import RANSACRegressor
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import make_pipeline
 
+from utils import ehance_contrast_gamma
 
 def enhance_contrast(image: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple = (8, 8)) -> np.ndarray:
     # convert to LAB color space
@@ -39,15 +40,7 @@ def enhace_contrast_equalized(image: np.ndarray) -> np.ndarray:
     return enhanced_image
 
 
-def ehance_contrast_gamma(image: np.ndarray, gamma: float = 1.2) -> np.ndarray:
-    # build a lookup table mapping the pixel values [0, 255] to their adjusted gamma values
-    inv_gamma = 1.0 / gamma
-    table = np.array([((i / 255.0) ** inv_gamma) *
-                     255 for i in np.arange(0, 256)]).astype("uint8")
 
-    # apply gamma correction using the lookup table
-    enhanced_image = cv2.LUT(image, table)
-    return enhanced_image
 
 
 def color_extract(image: np.ndarray, target_bgr_color: tuple = (255, 255, 255),
@@ -187,8 +180,12 @@ def fit_central_curve(img: np.ndarray):
     image = cv2.medianBlur(img, 3)
     # enhance contrast
     # enhanced_image = enhance_contrast(image, clip_limit=4.0, tile_grid_size=(16, 16))
-    enhanced_image = enhace_contrast_equalized(image)
-    # enhanced_image = ehance_contrast_gamma(image, gamma=0.2)
+    # enhanced_image = enhace_contrast_equalized(image)
+    enhanced_image = ehance_contrast_gamma(image, gamma=0.5)
+
+    cv2.imshow("Original Image", image)
+    cv2.imshow("Enhanced Image", enhanced_image)
+    cv2.waitKey(0)
 
     color_mask = color_extract(enhanced_image, target_bgr_color=(255, 255, 255),
                                distance_trheshold=0.2, display=True)
@@ -200,6 +197,9 @@ def fit_central_curve(img: np.ndarray):
     gamma_image = ehance_contrast_gamma(image, gamma=0.5)
     grad_mask = gradiant_extract_sobel(gamma_image, sobel_ksize=3,
                                        grad_thres_min=10, grad_thres_max=80)
+    
+    cv2.imshow("Gamma Adjusted Image for Gradient", gamma_image)
+    cv2.waitKey(0)
 
     combined_mask = cv2.bitwise_and(color_mask, grad_mask)
 
@@ -208,7 +208,6 @@ def fit_central_curve(img: np.ndarray):
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 5))
     combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
 
-    cv2.imshow("Gamma Image", gamma_image)
     cv2.imshow("Color Mask", color_mask)
     cv2.imshow("Gradient Mask", grad_mask)
     cv2.imshow("Combined Mask", combined_mask)
