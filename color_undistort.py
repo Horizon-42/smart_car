@@ -51,7 +51,20 @@ def apply_color_lens_correction(
     gain_G = np.clip(gain_G, 0.2, 5.0)
     gain_B = np.clip(gain_B, 0.2, 5.0)
 
-    img_f = img.astype(np.float32) / 255.0
+    if img is None:
+        raise ValueError("apply_color_lens_correction: img is None")
+
+    # Normalize to 3-channel BGR for OpenCV ops.
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.ndim == 3 and img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+    elif img.ndim != 3 or img.shape[2] != 3:
+        raise ValueError(f"apply_color_lens_correction: expected HxWx3 BGR, got shape={getattr(img, 'shape', None)}")
+
+    # Force a supported, contiguous dtype before cv2.split().
+    img_f = np.ascontiguousarray(img, dtype=np.float32)
+    img_f *= np.float32(1.0 / 255.0)
     b, g, r = cv2.split(img_f)
 
     r_corr = r * gain_R
