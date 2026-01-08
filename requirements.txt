@@ -1,0 +1,12 @@
+# Core runtime dependencies
+numpy
+opencv-python
+
+# Used by central_line_extract.py
+scikit-learn
+
+# Used by image_wrapper.py (optional; only if you use YAML config)
+PyYAML
+
+# Used by Theory-20251006/* scripts (optional)
+matplotlib
