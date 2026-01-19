@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from undistort import undistort_image
+import yaml
+
 
 def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
     """
@@ -25,7 +27,7 @@ def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
     image = cv2.imread(image_path)
     
     # undistort the image
-    image = undistort_image(image)
+    # image = undistort_image(image)
 
     cv2.imshow(window_name, image)
     cv2.setMouseCallback(window_name, mouse_callback)
@@ -69,24 +71,35 @@ def perspective_transform(image: cv2.Mat, src_points: list, dst_points: list, ds
         image, matrix, dsize=dst_image_size)
     return transformed_image
 
+def select_points(image_path: str):
 
-
-if __name__ == "__main__":
-    image_path = "road/road_000.jpg"  # Replace with your image path
     selected_points = pick_points_from_image(image_path)
     print("Selected points:", selected_points)
 
     # save points to a yaml file
-    import yaml
-    with open("test_data/selected_points.yaml", "w") as f:
+    with open("selected_points.yaml", "w") as f:
         yaml.dump({"selected_points": selected_points}, f)
 
+
+
+if __name__ == "__main__":
+    image_path = "road/road_000.jpg"  # Replace with your image path
+    image_path = "road_virtual/raw_0000020.png"
+    # select_points(image_path)
+    # load points from yaml file
+    with open("selected_points.yaml", "r") as f:
+        data = yaml.unsafe_load(f)
+    selected_points = data["selected_points"]
+
     image = cv2.imread(image_path)
-    image = undistort_image(image)
+    # image = undistort_image(image)
 
-    dst_image = (520,720)
+    # dst_image = (520,720)
+    dst_image = (320, 240)
+    pading = 10
 
-    dst_points = [(20, 20), (500, 20), (500, 700), (20, 700)]
+    dst_points = [(pading, pading), (dst_image[0]-pading, pading), 
+                  (dst_image[0]-pading, dst_image[1]-pading), (pading, dst_image[1]-pading)]
     transformed_image = perspective_transform(
         image, selected_points, dst_points, dst_image_size=dst_image)
 

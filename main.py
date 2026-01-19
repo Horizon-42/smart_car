@@ -78,7 +78,7 @@ if __name__ == "__main__":
             ori_img = cv2.imread(img_path)
             undistorted_img = pre_process(ori_img)
             cv2.imshow("Undistorted Image", undistorted_img)
-            process(undistorted_img)
+            # process(undistorted_img)
 
             key = cv2.waitKey(0)
             cv2.destroyAllWindows()
