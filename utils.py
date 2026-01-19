@@ -24,3 +24,10 @@ def linear_contrast_enhance(gray: np.ndarray, pivot: int = 128, scale: float = 1
     # apply linear contrast enhancement
     enhanced = np.clip((gray - pivot) * scale + pivot, 0, 255).astype(np.uint8)
     return enhanced
+
+def top_hat_transform(gray: np.ndarray, kernel_size: int = 15) -> np.ndarray:
+    # create a structuring element
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    # apply the top-hat morphological operation
+    top_hat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+    return top_hat
