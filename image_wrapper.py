@@ -90,6 +90,7 @@ if __name__ == "__main__":
     with open("selected_points.yaml", "r") as f:
         data = yaml.unsafe_load(f)
     selected_points = data["selected_points"]
+    print("Loaded points:", selected_points)
 
     image = cv2.imread(image_path)
     # image = undistort_image(image)
@@ -100,6 +101,7 @@ if __name__ == "__main__":
 
     dst_points = [(pading, pading), (dst_image[0]-pading, pading), 
                   (dst_image[0]-pading, dst_image[1]-pading), (pading, dst_image[1]-pading)]
+    print("Destination points:", dst_points)
     transformed_image = perspective_transform(
         image, selected_points, dst_points, dst_image_size=dst_image)
 
