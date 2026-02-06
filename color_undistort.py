@@ -81,3 +81,24 @@ def apply_color_lens_correction(
 
     corrected_u8 = (corrected * 255.0).astype(np.uint8)
     return corrected_u8
+
+
+def color_correct(img):
+    """
+    Color undistortion and lens correction preprocessing function.
+    
+    :param img: Description
+    """
+    h, w = img.shape[:2]
+    r2, r4 = build_radius_maps(h, w)
+
+    # Define lens correction parameters
+    params = {
+        "a": 0.88, "b": 0.88,
+        "c": 0.0, "d": 0.0,
+        "e": 0.0, "f": 0.0
+    }
+
+    # Apply color lens correction
+    img_corrected = apply_color_lens_correction(img, params, r2, r4)
+    return img_corrected

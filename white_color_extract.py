@@ -1,12 +1,12 @@
 import cv2
 import numpy as np
 from typing import Dict
+import json
 import os
 import glob
 
 from color_lens_correction import build_radius_maps, apply_color_lens_correction
 from undistort import undistort_image
-from utils import ehance_contrast_gamma
 
 def ehance_contrast_gamma(image: np.ndarray, gamma: float = 1.0) -> np.ndarray:
     # build a lookup table mapping the pixel values [0, 255] to their adjusted gamma values
@@ -20,82 +20,116 @@ def ehance_contrast_gamma(image: np.ndarray, gamma: float = 1.0) -> np.ndarray:
     enhanced_image = cv2.LUT(image, table)
     return enhanced_image
 
-def color_extract(image: np.ndarray, l_range: tuple = (0., 1.),
-                  a_range: tuple = (0., 1.), b_range: tuple = (0., 1.),
-                  display: bool = True) -> np.ndarray:
-    # convert to float32
-    image_float = image.astype(np.float32)/255.0
-    # convert to lab
-    image_lab = cv2.cvtColor(image_float, cv2.COLOR_BGR2Lab)
-    # normalize lab channels to [0,1]
-    image_lab[:, :, 0] /= 100.0
-    image_lab[:, :, 1] = (image_lab[:, :, 1] + 128.0) / 255.0
-    image_lab[:, :, 2] = (image_lab[:, :, 2] + 128.0) / 255.0
-    # create mask
-    l_mask = (image_lab[:, :, 0] >= l_range[0]) & (image_lab[:, :, 0] <= l_range[1])
-    a_mask = (image_lab[:, :, 1] >= a_range[0]) & (image_lab[:, :, 1] <= a_range[1])
-    b_mask = (image_lab[:, :, 2] >= b_range[0]) & (image_lab[:, :, 2] <= b_range[1])
-    mask = (l_mask & a_mask & b_mask).astype(np.uint8) * 255
+MODE_SPECS = {
+    "lab": {
+        "labels": ("L", "A", "B"),
+        "max": (255, 255, 255),
+        "cvt": cv2.COLOR_BGR2Lab,
+    },
+    "hsv": {
+        "labels": ("H", "S", "V"),
+        "max": (179, 255, 255),
+        "cvt": cv2.COLOR_BGR2HSV,
+    },
+}
 
-    # draw mask
+def color_extract(image: np.ndarray,
+                  mode: str,
+                  c1_range: tuple,
+                  c2_range: tuple,
+                  c3_range: tuple,
+                  display: bool = True) -> np.ndarray:
+    spec = MODE_SPECS[mode]
+    converted = cv2.cvtColor(image, spec["cvt"])
+    c1, c2, c3 = cv2.split(converted)
+
+    c1_mask = (c1 >= c1_range[0]) & (c1 <= c1_range[1])
+    c2_mask = (c2 >= c2_range[0]) & (c2 <= c2_range[1])
+    c3_mask = (c3 >= c3_range[0]) & (c3 <= c3_range[1])
+    mask = (c1_mask & c2_mask & c3_mask).astype(np.uint8) * 255
+
     if display:
-        cv2.imshow("L Channel", (image_lab[:, :, 0] * 255).astype(np.uint8))
-        cv2.imshow("A Channel", (image_lab[:, :, 1] * 255).astype(np.uint8))
-        cv2.imshow("B Channel", (image_lab[:, :, 2] * 255).astype(np.uint8))
+        cv2.imshow(f"{spec['labels'][0]} Channel", c1)
+        cv2.imshow(f"{spec['labels'][1]} Channel", c2)
+        cv2.imshow(f"{spec['labels'][2]} Channel", c3)
         cv2.imshow("Color Mask", mask)
         cv2.waitKey(0)
     return mask
 
 
 class TrackbarState:
-    def __init__(self):
-        # internal representation, updated in callback
-        # values stored as 0-200 (trackbar range)
+    def __init__(self, mode: str = "lab"):
+        self.mode = mode
         self.values = {
-            "l_min": 0,
-            "l_max": 200,
-            "a_min": 0,
-            "a_max": 200,
-            "b_min": 0,
-            "b_max": 200,
+            "lab": {
+                "c1_min": 0, "c1_max": 255,
+                "c2_min": 0, "c2_max": 255,
+                "c3_min": 0, "c3_max": 255,
+            },
+            "hsv": {
+                "c1_min": 0, "c1_max": 179,
+                "c2_min": 0, "c2_max": 255,
+                "c3_min": 0, "c3_max": 255,
+            },
         }
 
 
-def create_trackbar_window(state: TrackbarState, window_name: str = "Color Extract"):
+def create_trackbar_window(state: TrackbarState, mode: str, window_name: str):
     """
-    Create 6 trackbars:
-      each for min and max of L, A, B channels in Lab color space.
-    The trackbars range from 0 to 200, mapped to [0.0, 1.0] in the state.
+    Create 6 trackbars for the active color space.
     """
+    spec = MODE_SPECS[mode]
+    labels = spec["labels"]
+    max_vals = spec["max"]
+    current = state.values[mode]
+
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 1200, 800)
 
-    def make_cb(param_key: str):
+    def make_cb(param_key: str, mode_key: str):
         def cb(val):
-            state.values[param_key] = val  # store raw trackbar value (0-200)
+            state.values[mode_key][param_key] = val
         return cb
 
-    # (trackbar name, param key, initial value)
-    for name, key in [
-        ("L Min", "l_min"),
-        ("L Max", "l_max"),
-        ("A Min", "a_min"),
-        ("A Max", "a_max"),
-        ("B Min", "b_min"),
-        ("B Max", "b_max"),
-    ]:
-        initial_val = state.values[key]
-        cv2.createTrackbar(name, window_name, initial_val, 200, make_cb(key))
+    for idx, label in enumerate(labels, start=1):
+        min_key = f"c{idx}_min"
+        max_key = f"c{idx}_max"
+        max_val = max_vals[idx - 1]
+        cv2.createTrackbar(
+            f"{label} Min",
+            window_name,
+            current[min_key],
+            max_val,
+            make_cb(min_key, mode),
+        )
+        cv2.createTrackbar(
+            f"{label} Max",
+            window_name,
+            current[max_key],
+            max_val,
+            make_cb(max_key, mode),
+        )
 
-def get_params_from_state(state: TrackbarState) -> Dict[str, float]:
-    """Convert trackbar values (0-200) to normalized (0.0-1.0) for color_extract."""
+def get_params_from_state(state: TrackbarState, mode: str) -> Dict[str, int]:
+    return dict(state.values[mode])
+
+def build_json_payload(state: TrackbarState) -> Dict[str, Dict[str, int]]:
+    def mode_payload(mode: str) -> Dict[str, int]:
+        labels = MODE_SPECS[mode]["labels"]
+        values = state.values[mode]
+        return {
+            f"{labels[0].lower()}_min": values["c1_min"],
+            f"{labels[0].lower()}_max": values["c1_max"],
+            f"{labels[1].lower()}_min": values["c2_min"],
+            f"{labels[1].lower()}_max": values["c2_max"],
+            f"{labels[2].lower()}_min": values["c3_min"],
+            f"{labels[2].lower()}_max": values["c3_max"],
+        }
+
     return {
-        "l_min": state.values["l_min"] / 200.0,
-        "l_max": state.values["l_max"] / 200.0,
-        "a_min": state.values["a_min"] / 200.0,
-        "a_max": state.values["a_max"] / 200.0,
-        "b_min": state.values["b_min"] / 200.0,
-        "b_max": state.values["b_max"] / 200.0,
+        "active_mode": state.mode,
+        "lab": mode_payload("lab"),
+        "hsv": mode_payload("hsv"),
     }
 
 def list_road_images(road_dir: str) -> list:
@@ -148,27 +182,40 @@ def main():
     # undistort image
     img = pre_process(img)
 
-    state = TrackbarState()
-    win_name = "White Color Extract"
-    create_trackbar_window(state, win_name)
+    state = TrackbarState(mode="lab")
+    preview_name = "White Color Extract"
+    controls_name = f"Controls ({state.mode.upper()})"
+    create_trackbar_window(state, state.mode, controls_name)
     print("Controls:")
     print("  n: next image")
     print("  p: previous image")
+    print("  m: switch mode (Lab/HSV)")
     print("  q or ESC: quit")   
 
     while True:
-        params = get_params_from_state(state)
+        params = get_params_from_state(state, state.mode)
         color_mask = color_extract(
             img,
-            l_range=(params["l_min"], params["l_max"]),
-            a_range=(params["a_min"], params["a_max"]),
-            b_range=(params["b_min"], params["b_max"]),
+            mode=state.mode,
+            c1_range=(params["c1_min"], params["c1_max"]),
+            c2_range=(params["c2_min"], params["c2_max"]),
+            c3_range=(params["c3_min"], params["c3_max"]),
             display=False
         )
 
         # Show original and mask side-by-side
         combined = np.hstack((img, cv2.cvtColor(color_mask, cv2.COLOR_GRAY2BGR)))
-        cv2.imshow(win_name, combined)
+        cv2.putText(
+            combined,
+            f"Mode: {state.mode.upper()}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.imshow(preview_name, combined)
 
         key = cv2.waitKey(100) & 0xFF
         if key == ord('n'):
@@ -179,10 +226,20 @@ def main():
             idx = (idx - 1) % len(images)
             img = cv2.imread(images[idx], cv2.IMREAD_COLOR)
             img = pre_process(img)
+        elif key == ord('m'):
+            cv2.destroyWindow(controls_name)
+            state.mode = "hsv" if state.mode == "lab" else "lab"
+            controls_name = f"Controls ({state.mode.upper()})"
+            create_trackbar_window(state, state.mode, controls_name)
         elif key == ord('q') or key == 27:  # 'q' or ESC to quit
             break
 
     cv2.destroyAllWindows()
+    save_path = os.path.join(os.path.dirname(__file__), "white_color_extract_params.json")
+    payload = build_json_payload(state)
+    with open(save_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+    print(f"Saved params to {save_path}")
 
 if __name__ == "__main__":
     main()

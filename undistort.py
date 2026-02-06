@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 
-
 def undistort_image(img: np.ndarray):
     h, w = img.shape[:2]
     mtx = np.array(
