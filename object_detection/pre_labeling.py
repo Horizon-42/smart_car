@@ -27,10 +27,15 @@ def pre_label_images(
     imgsz=None,
     device=None,
     half=False,
-    chunk_size=1000,
+    chunk_size=100,
 ):
     # Load the YOLOv8 model
     model = YOLO(model_name)
+
+    pareent_folder = Path(image_folder).parent
+    labels_folder = pareent_folder / 'labels'
+    if not labels_folder.exists():
+        labels_folder.mkdir(parents=True, exist_ok=True)
 
     # Run inference on the images in the specified folder (optionally limited)
     image_paths = _collect_images(image_folder, max_images=max_images)
@@ -65,7 +70,12 @@ def pre_label_images(
 
         for result in results:
             image_path = Path(result.path)
-            label_path = image_path.with_suffix('.txt')
+            
+            pareent_folder = image_path.parent
+            label_path = labels_folder / (image_path.stem + '.txt')
+            if not label_path.parent.exists():
+                label_path.parent.mkdir(parents=True, exist_ok=True)
+
             if label_path.exists():
                 label_path.unlink()
             if result.boxes is None or len(result.boxes) == 0:
@@ -82,5 +92,5 @@ def pre_label_images(
         progress.close()
 
 if __name__ == "__main__":
-    image_folder = "object_detection/data/combined_dataset/images"
-    pre_label_images(image_folder, max_images=None)
+    image_folder = "object_detection/data/combined_dataset_labeled/images"
+    pre_label_images(image_folder, max_images=None, model_name='yolo26s.pt')
