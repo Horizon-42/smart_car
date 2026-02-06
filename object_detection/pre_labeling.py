@@ -27,7 +27,7 @@ def pre_label_images(
     imgsz=None,
     device=None,
     half=False,
-    chunk_size=500,
+    chunk_size=100,
 ):
     # Load the YOLOv8 model
     model = YOLO(model_name)
@@ -93,4 +93,4 @@ def pre_label_images(
 
 if __name__ == "__main__":
     image_folder = "object_detection/data/combined_dataset_640X480/images"
-    pre_label_images(image_folder, max_images=None, model_name='yolo26n.pt')
+    pre_label_images(image_folder, max_images=None, batch_size=1, model_name='yolo26m.pt')

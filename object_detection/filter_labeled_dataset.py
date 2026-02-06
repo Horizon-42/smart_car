@@ -22,20 +22,31 @@ def _collect_images(src_dir: Path) -> list[Path]:
 
 def filter_labeled_dataset(src_dir: Path, dst_dir: Path, move: bool = False) -> None:
     src_dir = src_dir.expanduser()
+    src_images_dir = src_dir / 'images'
+    if not src_images_dir.is_dir():
+        print(f"Source images directory does not exist: {src_images_dir}")
+        return
+    src_labels_dir = src_dir / 'labels'
+    if not src_labels_dir.is_dir():
+        print(f"Source labels directory does not exist: {src_labels_dir}")
+        return
+    
     dst_dir = dst_dir.expanduser()
     images_dir = dst_dir / 'images'
     labels_dir = dst_dir / 'labels'
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
 
-    images = _collect_images(src_dir)
+    images = _collect_images(src_images_dir)
     if not images:
+        print(f"No images found in source directory: {src_images_dir}")
         return
 
     for image_path in images:
-        label_path = image_path.with_suffix('.txt')
+        label_path = src_labels_dir / (image_path.stem + '.txt')
         if not _has_labels(label_path):
             continue
+        print(f"Processing: {image_path.name} with labels: {label_path.name}")
 
         dst_image = images_dir / image_path.name
         dst_label = labels_dir / label_path.name

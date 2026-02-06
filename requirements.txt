@@ -10,3 +10,5 @@ PyYAML
 
 # Used by Theory-20251006/* scripts (optional)
 matplotlib
+
+ultralytics
