@@ -29,7 +29,7 @@ if __name__ == "__main__":
     gray_mat = np.full((100, 100, 3), gray, dtype=np.uint8)
     gray_hsv = cv2.cvtColor(gray_mat, cv2.COLOR_BGR2HSV)[0,0]
     print("Gray in HSV:", gray_hsv)
-    exit(0)
+    # exit(0)
 
     im_pathes = [os.path.join("road", f) for f in os.listdir("road") if f.endswith(".jpg")]
     for im_path in im_pathes:
