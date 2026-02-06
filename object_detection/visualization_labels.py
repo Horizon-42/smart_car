@@ -71,7 +71,8 @@ def visualize_labels(image_folder, class_names=None):
     while 0 <= index < len(image_files):
         filename = image_files[index]
         image_path = os.path.join(image_folder, filename)
-        label_path = os.path.join(image_folder, os.path.splitext(filename)[0] + '.txt')
+        parent_folder = os.path.dirname(image_folder)
+        label_path = os.path.join(parent_folder, 'labels', os.path.splitext(filename)[0] + '.txt')
 
         image = cv2.imread(image_path)
         if image is None:
@@ -157,3 +158,23 @@ def visualize_labels(image_folder, class_names=None):
         index += 1
 
     cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Visualize YOLO format labels on images in a folder.'
+    )
+    parser.add_argument(
+        '--image_folder',
+        required=True,
+        help='Path to the folder containing images.',
+    )
+    parser.add_argument(
+        '--class_names',
+        nargs='*',
+        help='Optional list of class names corresponding to class IDs.',
+    )
+    args = parser.parse_args()
+    visualize_labels(args.image_folder, class_names=args.class_names)
