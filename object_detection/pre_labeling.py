@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 from tqdm import tqdm
 
@@ -30,7 +31,11 @@ def pre_label_images(
     chunk_size=100,
 ):
     # Load the YOLOv8 model
-    model = YOLO(model_name)
+    model_path = Path(model_name)
+    if model_path.exists():
+        model = YOLO(str(model_path.resolve()))
+    else:
+        model = YOLO(model_name)
 
     pareent_folder = Path(image_folder).parent
     labels_folder = pareent_folder / 'labels'
@@ -92,5 +97,36 @@ def pre_label_images(
         progress.close()
 
 if __name__ == "__main__":
-    image_folder = "object_detection/data/combined_dataset_640X480/images"
-    pre_label_images(image_folder, max_images=None, batch_size=1, model_name='yolo26m.pt')
+    parser = argparse.ArgumentParser(description='Pre-label images with a YOLO model.')
+    parser.add_argument(
+        '--images',
+        default='object_detection/data/combined_dataset_640X480/images',
+        help='Image folder or single image path.',
+    )
+    parser.add_argument(
+        '--model',
+        default='yolo26m.pt',
+        help='Model file path or model name (e.g. yolov8n.pt).',
+    )
+    parser.add_argument('--conf', type=float, default=0.25, help='Confidence threshold.')
+    parser.add_argument('--max-images', type=int, default=None, help='Max images to process.')
+    parser.add_argument('--batch-size', type=int, default=1, help='Batch size.')
+    parser.add_argument('--imgsz', type=int, default=None, help='Image size.')
+    parser.add_argument('--device', default=None, help='Device, e.g. 0 or cpu.')
+    parser.add_argument('--half', action='store_true', help='Use FP16 if supported.')
+    parser.add_argument('--chunk-size', type=int, default=100, help='Chunk size for streaming.')
+    parser.add_argument('--no-save-conf', action='store_true', help='Do not save confidences.')
+    args = parser.parse_args()
+
+    pre_label_images(
+        args.images,
+        model_name=args.model,
+        conf_threshold=args.conf,
+        save_conf=not args.no_save_conf,
+        max_images=args.max_images,
+        batch_size=args.batch_size,
+        imgsz=args.imgsz,
+        device=args.device,
+        half=args.half,
+        chunk_size=args.chunk_size,
+    )

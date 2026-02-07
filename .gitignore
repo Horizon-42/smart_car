@@ -14,3 +14,7 @@ __pycache__
 *.pt
 
 data
+
+runs
+
+images.cache
