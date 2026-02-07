@@ -1,26 +1,28 @@
 import cv2
 import numpy as np
 
+with open("my_car/camera_calibration.npz", "rb") as f:
+    data = np.load(f)
+    my_mtx = data['mtx']
+    my_dist_coeffs = data['dist']
 
-def undistort_image(img: np.ndarray):
+with np.load("nayans_car/camera_calibration.npz") as data:
+    nayan_mtx = data['mtx']
+    nayan_dist_coeffs = data['dist']
+
+
+def undistort_image(img: np.ndarray, car_name:str ="my") -> np.ndarray:
     h, w = img.shape[:2]
-    # mtx = np.array(
-    #     [[402.60350228,   0.,         263.30000918],
-    #      [0.,       537.76023089, 278.24728515],
-    #         [0.,        0.,      1.]]
-    # )
-
-    mtx = np.array(
-        [[402.1887773,    0.,         275.17408871],
-         [0.,         534.47562063, 269.86024306],
-            [0.,           0.,          1.]])
-
-    dist_coeffs = np.array(
-        # [[-0.31085325, -0.11558236,  0.00249467, -0.00088277,  0.51442531]])
-        [[-0.39206646, 0.28652572,  0.00865541,  0.00148789, -0.19605203]])
-
+    if car_name == "my":
+        mtx = my_mtx
+        dist_coeffs = my_dist_coeffs
+    elif car_name == "nayan":
+        mtx = nayan_mtx
+        dist_coeffs = nayan_dist_coeffs
+    else:
+        raise ValueError(f"Unknown car name: {car_name}")
     newcameramtx, roi = cv2.getOptimalNewCameraMatrix(
-        mtx, dist_coeffs, (w, h), 1, (w, h))
+        mtx, dist_coeffs, (w, h), 0, (w, h))
 
     undistorted_img = cv2.undistort(img, newcameramtx, dist_coeffs)
     x, y, w, h = roi

@@ -52,7 +52,8 @@ if __name__ == "__main__":
     for im_path in im_pathes:
         frame = cv2.imread(im_path)
         frame = color_correct(frame)
-        undistorted = undistort_image(frame)
+        undistorted = undistort_image(frame, car_name="nayan")
+        print("undistorted shape:", undistorted.shape)
         # resize to 640x480
         undistorted = cv2.resize(undistorted, (640, 480))
 
