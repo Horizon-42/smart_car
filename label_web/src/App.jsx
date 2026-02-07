@@ -16,6 +16,8 @@ const PALETTE = [
 const emptyMeta = {
   images: [],
   classes: [],
+  customClasses: [],
+  editedImages: [],
   outputDir: "",
   datasetDir: "",
   saveConf: false
@@ -38,15 +40,24 @@ export default function App() {
   const [index, setIndex] = useState(0);
   const [boxes, setBoxes] = useState([]);
   const [selectedIdx, setSelectedIdx] = useState(null);
-  const [drawMode, setDrawMode] = useState(false);
   const [status, setStatus] = useState("Loading dataset...");
   const [image, setImage] = useState(null);
   const [imageSize, setImageSize] = useState({ w: 1, h: 1 });
   const [dragBox, setDragBox] = useState(null);
   const [currentClass, setCurrentClass] = useState(0);
   const [jumpValue, setJumpValue] = useState("");
+  const [showEditedOnly, setShowEditedOnly] = useState(false);
+  const [editedMap, setEditedMap] = useState({});
+  const [labelSourceMap, setLabelSourceMap] = useState({});
+  const autoSaveTimer = useRef(null);
+  const fullIndexRef = useRef(0);
+  const fullImageRef = useRef("");
+  const dragStartRef = useRef(null);
 
-  const currentImage = meta.images[index];
+  const visibleImages = showEditedOnly
+    ? meta.images.filter((item) => editedMap[item.name])
+    : meta.images;
+  const currentImage = visibleImages[index];
   const currentImageName = currentImage ? currentImage.name : "";
 
   useEffect(() => {
@@ -60,6 +71,13 @@ export default function App() {
         const data = await response.json();
         if (!active) return;
         setMeta(data);
+        if (Array.isArray(data.editedImages)) {
+          const nextEdited = {};
+          data.editedImages.forEach((name) => {
+            nextEdited[name] = true;
+          });
+          setEditedMap(nextEdited);
+        }
         setIndex(0);
         setCurrentClass(0);
         setStatus(data.images.length ? "" : "No images found.");
@@ -103,10 +121,17 @@ export default function App() {
         }
         const data = await response.json();
         if (!active) return;
-        const nextBoxes = Array.isArray(data.boxes) ? data.boxes : [];
+        const source = data.source === "edited" ? "edited" : "original";
+        const nextBoxes = Array.isArray(data.boxes)
+          ? data.boxes.map((box) => ({ ...box, edited: source === "edited" }))
+          : [];
         setBoxes(nextBoxes);
+        setLabelSourceMap((prev) => ({ ...prev, [currentImageName]: source }));
         if (nextBoxes.some((box) => typeof box.conf === "number")) {
           setMeta((prev) => ({ ...prev, saveConf: true }));
+        }
+        if (source === "edited") {
+          setEditedMap((prev) => ({ ...prev, [currentImageName]: true }));
         }
         setSelectedIdx(null);
         setDragBox(null);
@@ -137,29 +162,65 @@ export default function App() {
   useEffect(() => {
     resizeCanvas();
     drawCanvas();
-  }, [image, boxes, selectedIdx, dragBox, drawMode]);
+  }, [image, boxes, selectedIdx, dragBox]);
+
+  function queueSave(nextBoxes, imageName = currentImageName) {
+    if (!imageName) return;
+    setEditedMap((prev) => ({ ...prev, [imageName]: true }));
+    setLabelSourceMap((prev) => ({ ...prev, [imageName]: "edited" }));
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+    }
+    autoSaveTimer.current = setTimeout(() => {
+      saveLabels({ silent: true, boxesOverride: nextBoxes, imageName });
+    }, 400);
+  }
+
+  useEffect(() => {
+    if (index >= visibleImages.length) {
+      setIndex(Math.max(0, visibleImages.length - 1));
+    }
+    if (showEditedOnly && visibleImages.length === 0) {
+      setStatus("No edited images.");
+    }
+    if (!showEditedOnly && status === "No edited images.") {
+      setStatus("");
+    }
+    if (showEditedOnly && visibleImages.length > 0 && status === "No edited images.") {
+      setStatus("");
+    }
+  }, [visibleImages.length, index, showEditedOnly, status]);
 
   useEffect(() => {
     const handler = (event) => {
       const tag = event.target.tagName;
-      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+      if (tag === "INPUT" || tag === "TEXTAREA") {
         return;
       }
       if (event.key === "ArrowRight") {
+        event.preventDefault();
         nextImage();
       } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
         prevImage();
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        cycleClass(-1);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        cycleClass(1);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        clearAll();
       } else if (event.key === "s" || event.key === "S") {
         saveLabels();
-      } else if (event.key === "a" || event.key === "A") {
-        setDrawMode((prev) => !prev);
       } else if (event.key === "Delete") {
         deleteSelected();
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [index, meta.images.length, boxes, selectedIdx, drawMode, currentClass]);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [index, visibleImages.length, boxes, selectedIdx, currentClass]);
 
   function resizeCanvas() {
     const canvas = canvasRef.current;
@@ -184,6 +245,20 @@ export default function App() {
     const offsetX = (canvasW - displayW) / 2;
     const offsetY = (canvasH - displayH) / 2;
     return { scale, offsetX, offsetY, displayW, displayH };
+  }
+
+  function labelNameFor(box) {
+    const classId = box.classId;
+    const source = labelSourceMap[currentImageName];
+    const useCustom =
+      box.edited || source === "edited";
+    if (useCustom && meta.customClasses.length && classId < meta.customClasses.length) {
+      return meta.customClasses[classId];
+    }
+    if (meta.classes.length && classId < meta.classes.length) {
+      return meta.classes[classId];
+    }
+    return `class_${classId}`;
   }
 
   function drawCanvas() {
@@ -212,7 +287,7 @@ export default function App() {
       ctx.lineWidth = idx === selectedIdx ? 3 : 2;
       ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
-      const className = meta.classes[box.classId] || `class_${box.classId}`;
+      const className = labelNameFor(box);
       const confText =
         meta.saveConf && typeof box.conf === "number"
           ? ` ${box.conf.toFixed(2)}`
@@ -256,19 +331,25 @@ export default function App() {
   function onMouseDown(event) {
     const norm = canvasToNorm(event);
     if (!norm) return;
-    if (drawMode) {
-      dragRef.current = norm;
-      setDragBox({ x1: norm.x, y1: norm.y, x2: norm.x, y2: norm.y });
-      return;
-    }
-    selectBox(norm.x, norm.y);
+    dragStartRef.current = {
+      norm,
+      screenX: event.clientX,
+      screenY: event.clientY
+    };
+    dragRef.current = norm;
+    setDragBox(null);
   }
 
   function onMouseMove(event) {
-    if (!drawMode || !dragRef.current) return;
+    if (!dragRef.current || !dragStartRef.current) return;
     const norm = canvasToNorm(event);
     if (!norm) return;
-    const start = dragRef.current;
+    const start = dragStartRef.current.norm;
+    const dx = event.clientX - dragStartRef.current.screenX;
+    const dy = event.clientY - dragStartRef.current.screenY;
+    if (Math.hypot(dx, dy) < 4 && !dragBox) {
+      return;
+    }
     const x1 = Math.min(start.x, norm.x);
     const y1 = Math.min(start.y, norm.y);
     const x2 = Math.max(start.x, norm.x);
@@ -277,12 +358,21 @@ export default function App() {
   }
 
   function onMouseUp(event) {
-    if (!drawMode || !dragRef.current) return;
+    if (!dragRef.current || !dragStartRef.current) return;
     const norm = canvasToNorm(event);
-    const start = dragRef.current;
+    const start = dragStartRef.current.norm;
+    const dx = event.clientX - dragStartRef.current.screenX;
+    const dy = event.clientY - dragStartRef.current.screenY;
+    const moved = Math.hypot(dx, dy) >= 4;
     dragRef.current = null;
+    dragStartRef.current = null;
     if (!norm) {
       setDragBox(null);
+      return;
+    }
+    if (!moved) {
+      setDragBox(null);
+      selectBox(start.x, start.y);
       return;
     }
     const x1 = clamp01(Math.min(start.x, norm.x));
@@ -303,13 +393,13 @@ export default function App() {
       y1,
       x2,
       y2,
-      conf: meta.saveConf ? 1.0 : null
+      conf: meta.saveConf ? 1.0 : null,
+      edited: true
     };
-    setBoxes((prev) => {
-      const next = [...prev, newBox];
-      setSelectedIdx(next.length - 1);
-      return next;
-    });
+    const nextBoxes = [...boxes, newBox];
+    setBoxes(nextBoxes);
+    setSelectedIdx(nextBoxes.length - 1);
+    queueSave(nextBoxes);
   }
 
   function selectBox(nx, ny) {
@@ -324,36 +414,58 @@ export default function App() {
     setSelectedIdx(null);
   }
 
+  function cycleClass(delta) {
+    const list = meta.customClasses.length ? meta.customClasses : meta.classes;
+    const total = list.length || 1;
+    const next = (currentClass + delta + total) % total;
+    setCurrentClass(next);
+    if (selectedIdx === null) return;
+    const nextBoxes = [...boxes];
+    if (nextBoxes[selectedIdx]) {
+      nextBoxes[selectedIdx] = {
+        ...nextBoxes[selectedIdx],
+        classId: next,
+        edited: true
+      };
+      setBoxes(nextBoxes);
+      queueSave(nextBoxes);
+    }
+  }
+
   function updateClass(event) {
     const value = Number(event.target.value);
     if (Number.isNaN(value)) return;
     setCurrentClass(value);
     if (selectedIdx === null) return;
-    setBoxes((prev) => {
-      const next = [...prev];
-      if (next[selectedIdx]) {
-        next[selectedIdx] = { ...next[selectedIdx], classId: value };
-      }
-      return next;
-    });
+    const nextBoxes = [...boxes];
+    if (nextBoxes[selectedIdx]) {
+      nextBoxes[selectedIdx] = {
+        ...nextBoxes[selectedIdx],
+        classId: value,
+        edited: true
+      };
+      setBoxes(nextBoxes);
+      queueSave(nextBoxes);
+    }
   }
 
   function deleteSelected() {
     if (selectedIdx === null) return;
-    setBoxes((prev) => prev.filter((_, idx) => idx !== selectedIdx));
+    const nextBoxes = boxes.filter((_, idx) => idx !== selectedIdx);
+    setBoxes(nextBoxes);
     setSelectedIdx(null);
+    queueSave(nextBoxes);
   }
 
   function clearAll() {
     if (!boxes.length) return;
-    const confirmed = window.confirm("Clear all boxes for this image?");
-    if (!confirmed) return;
     setBoxes([]);
     setSelectedIdx(null);
+    queueSave([]);
   }
 
   function nextImage() {
-    if (index < meta.images.length - 1) {
+    if (index < visibleImages.length - 1) {
       setIndex(index + 1);
     }
   }
@@ -364,21 +476,32 @@ export default function App() {
     }
   }
 
-  async function saveLabels() {
-    if (!currentImageName) return;
-    setStatus("Saving...");
+  async function saveLabels({ silent = false, boxesOverride, imageName } = {}) {
+    const targetName = imageName || currentImageName;
+    if (!targetName) return;
+    if (!silent) {
+      setStatus("Saving...");
+    }
     try {
-      const response = await fetch(`/api/labels/${encodeURIComponent(currentImageName)}`, {
+      const payloadBoxes = Array.isArray(boxesOverride) ? boxesOverride : boxes;
+      const response = await fetch(`/api/labels/${encodeURIComponent(targetName)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boxes, saveConf: meta.saveConf })
+        body: JSON.stringify({ boxes: payloadBoxes, saveConf: meta.saveConf })
       });
       if (!response.ok) {
         throw new Error("Save failed");
       }
       const data = await response.json();
-      setStatus(`Saved to ${data.path}`);
-      setTimeout(() => setStatus(""), 1800);
+      setLabelSourceMap((prev) => ({ ...prev, [targetName]: "edited" }));
+      setEditedMap((prev) => ({ ...prev, [targetName]: true }));
+      if (silent) {
+        setStatus("Auto-saved");
+        setTimeout(() => setStatus(""), 1200);
+      } else {
+        setStatus(`Saved to ${data.path}`);
+        setTimeout(() => setStatus(""), 1800);
+      }
     } catch (error) {
       setStatus(error.message || "Save failed");
     }
@@ -388,9 +511,31 @@ export default function App() {
     const value = Number(jumpValue);
     if (Number.isNaN(value)) return;
     const target = value - 1;
-    if (target >= 0 && target < meta.images.length) {
+    if (target >= 0 && target < visibleImages.length) {
       setIndex(target);
     }
+  }
+
+  function toggleEditedOnly() {
+    if (!showEditedOnly) {
+      fullIndexRef.current = index;
+      fullImageRef.current = currentImageName;
+      const editedList = meta.images.filter((item) => editedMap[item.name]);
+      if (editedList.length === 0) {
+        setStatus("No edited images.");
+        return;
+      }
+      const currentIdx = editedList.findIndex((item) => item.name === currentImageName);
+      setShowEditedOnly(true);
+      setIndex(currentIdx >= 0 ? currentIdx : 0);
+      return;
+    }
+    setShowEditedOnly(false);
+    const desiredName = fullImageRef.current;
+    const fullIdx = desiredName
+      ? meta.images.findIndex((item) => item.name === desiredName)
+      : fullIndexRef.current;
+    setIndex(fullIdx >= 0 ? fullIdx : 0);
   }
 
   return (
@@ -427,13 +572,15 @@ export default function App() {
               <button
                 className="btn"
                 onClick={nextImage}
-                disabled={index >= meta.images.length - 1}
+                disabled={index >= visibleImages.length - 1}
               >
                 Next
               </button>
             </div>
             <div className="row">
-              <span className="small">{meta.images.length ? `${index + 1} / ${meta.images.length}` : "0 / 0"}</span>
+              <span className="small">
+                {visibleImages.length ? `${index + 1} / ${visibleImages.length}` : "0 / 0"}
+              </span>
             </div>
             <div className="row">
               <input
@@ -444,26 +591,34 @@ export default function App() {
               />
               <button className="btn" onClick={jumpToIndex}>Go</button>
             </div>
+            <div className="row">
+              <button
+                className={`btn ${showEditedOnly ? "btn-active" : ""}`}
+                onClick={toggleEditedOnly}
+                disabled={!showEditedOnly && Object.keys(editedMap).length === 0}
+              >
+                {showEditedOnly ? "Show All" : "Edited Only"}
+              </button>
+            </div>
           </div>
 
           <div className="section">
-            <div className="section-title">Draw</div>
+            <div className="section-title">Labeling</div>
             <div className="row">
-              <button className={`btn ${drawMode ? "btn-active" : ""}`} onClick={() => setDrawMode((prev) => !prev)}>
-                {drawMode ? "Drawing" : "Draw Box"}
-              </button>
               <button className="btn" onClick={clearAll} disabled={!boxes.length}>
                 Clear
               </button>
             </div>
             <div className="row">
               <select className="select" value={currentClass} onChange={updateClass}>
-                {meta.classes.length
-                  ? meta.classes.map((name, idx) => (
-                      <option key={name} value={idx}>
-                        {idx}: {name}
-                      </option>
-                    ))
+                {(meta.customClasses.length ? meta.customClasses : meta.classes).length
+                  ? (meta.customClasses.length ? meta.customClasses : meta.classes).map(
+                      (name, idx) => (
+                        <option key={`${idx}-${name}`} value={idx}>
+                          {idx}: {name}
+                        </option>
+                      )
+                    )
                   : [
                       <option key="0" value={0}>
                         0: class_0
@@ -477,8 +632,8 @@ export default function App() {
             <div className="section-title">Boxes</div>
             <div className="box-list">
               {boxes.length === 0 && <div className="empty">No boxes</div>}
-              {boxes.map((box, idx) => {
-                const name = meta.classes[box.classId] || `class_${box.classId}`;
+                {boxes.map((box, idx) => {
+                const name = labelNameFor(box);
                 const confText =
                   meta.saveConf && typeof box.conf === "number"
                     ? ` ${box.conf.toFixed(2)}`
@@ -511,10 +666,11 @@ export default function App() {
 
           <div className="section">
             <div className="section-title">Tips</div>
-            <div className="tip">Toggle draw: A</div>
+            <div className="tip">Drag on image to draw</div>
             <div className="tip">Save: S</div>
             <div className="tip">Delete: Del</div>
-            <div className="tip">Prev/Next: ← →</div>
+            <div className="tip">Prev/Next image: ← →</div>
+            <div className="tip">Change class: ↑ ↓</div>
           </div>
         </aside>
       </div>

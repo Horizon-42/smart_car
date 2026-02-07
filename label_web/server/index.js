@@ -45,8 +45,22 @@ async function listImages() {
   }
 }
 
-async function readClasses() {
-  const classesPath = path.join(datasetDir, "classes.txt");
+async function listEditedImages(imageNames) {
+  try {
+    const entries = await fsp.readdir(outputDir, { withFileTypes: true });
+    const editedStems = new Set(
+      entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => path.parse(entry.name).name)
+    );
+    return imageNames.filter((name) => editedStems.has(path.parse(name).name));
+  } catch (error) {
+    return [];
+  }
+}
+
+async function readClasses(fileName) {
+  const classesPath = path.join(datasetDir, fileName);
   try {
     const content = await fsp.readFile(classesPath, "utf-8");
     return content
@@ -62,6 +76,12 @@ function labelPathForImage(imageName) {
   const safeName = path.basename(imageName);
   const stem = path.parse(safeName).name;
   return path.join(labelsDir, `${stem}.txt`);
+}
+
+function outputLabelPathForImage(imageName) {
+  const safeName = path.basename(imageName);
+  const stem = path.parse(safeName).name;
+  return path.join(outputDir, `${stem}.txt`);
 }
 
 async function parseLabelFile(labelPath) {
@@ -110,6 +130,12 @@ async function parseLabelFile(labelPath) {
 
 async function detectSaveConf(imageNames) {
   for (const name of imageNames) {
+    const outputPath = outputLabelPathForImage(name);
+    if (fs.existsSync(outputPath)) {
+      const { hasConf } = await parseLabelFile(outputPath);
+      if (hasConf) return true;
+      continue;
+    }
     const labelPath = labelPathForImage(name);
     if (!fs.existsSync(labelPath)) continue;
     const { hasConf } = await parseLabelFile(labelPath);
@@ -122,11 +148,15 @@ app.use("/data/images", express.static(imagesDir));
 
 app.get("/api/meta", async (_req, res) => {
   const images = await listImages();
-  const classes = await readClasses();
+  const classes = await readClasses("classes.txt");
+  const customClasses = await readClasses("custom_class.txt");
+  const editedImages = await listEditedImages(images);
   const saveConf = await detectSaveConf(images);
   res.json({
     images: images.map((name) => ({ name })),
     classes,
+    customClasses,
+    editedImages,
     datasetDir,
     outputDir,
     saveConf
@@ -139,9 +169,15 @@ app.get("/api/labels/:imageName", async (req, res) => {
     res.status(400).json({ error: "Missing image name" });
     return;
   }
+  const outputPath = outputLabelPathForImage(imageName);
+  if (fs.existsSync(outputPath)) {
+    const result = await parseLabelFile(outputPath);
+    res.json({ boxes: result.boxes, source: "edited" });
+    return;
+  }
   const labelPath = labelPathForImage(imageName);
   const result = await parseLabelFile(labelPath);
-  res.json({ boxes: result.boxes });
+  res.json({ boxes: result.boxes, source: "original" });
 });
 
 app.post("/api/labels/:imageName", async (req, res) => {
