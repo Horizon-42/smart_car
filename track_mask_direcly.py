@@ -28,7 +28,7 @@ def get_mask_hsv(frame:np.ndarray, hsv_low_bound=(0, 100, 120), hsv_high_bound=(
     mask = cv2.inRange(hsv_frame, hsv_low_bound, hsv_high_bound)
     return mask
 
-def get_track_mask(frame:np.ndarray, hsv_bound:HSVBoundRealTrack, car_name:str)->np.ndarray:
+def get_track_mask(frame:np.ndarray, hsv_bound, car_name:str)->np.ndarray:
     frame = color_correct(frame)
     undistorted = undistort_image(frame, car_name="nayan")
     if undistorted.shape != frame.shape:
@@ -36,6 +36,10 @@ def get_track_mask(frame:np.ndarray, hsv_bound:HSVBoundRealTrack, car_name:str)-
         undistorted = cv2.resize(undistorted, (frame.shape[1], frame.shape[0]))
     track_mask = get_mask_hsv(undistorted, hsv_bound.track_low, hsv_bound.track_high)
     return undistorted, track_mask
+
+def get_track_mask_directly(frame:np.ndarray, hsv_bound)->np.ndarray:
+    track_mask = get_mask_hsv(frame, hsv_bound.track_low, hsv_bound.track_high)
+    return track_mask
 
 
 if __name__ == "__main__":

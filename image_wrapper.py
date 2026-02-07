@@ -5,7 +5,7 @@ import yaml
 from undistort import undistort_image
 
 
-def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
+def pick_points_from_image(image, window_name: str = "Image") -> list:
     """
     Display an image and allow the user to pick points by clicking on it.
     Left click to select points, right click to finish selection.
@@ -22,13 +22,8 @@ def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             points.append((x, y))
-            cv2.circle(image, (x, y), 5, (0, 255, 0), -1)
+            cv2.circle(image, (x, y), 2, (0, 255, 0), -1)
             cv2.imshow(window_name, image)
-
-    image = cv2.imread(image_path)
-    
-    # undistort the image
-    # image = undistort_image(image)
 
     cv2.imshow(window_name, image)
     cv2.setMouseCallback(window_name, mouse_callback)
@@ -36,10 +31,6 @@ def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
 
     # only took last 4 points, and algin the y axis for 2 pairs
     points = points[-4:]
-    points[0] = (points[0][0], (points[0][1] + points[1][1]) // 2)
-    points[1] = (points[1][0], (points[0][1]))
-    points[2] = (points[2][0], (points[2][1] + points[3][1]) // 2)
-    points[3] = (points[3][0], (points[2][1]))
     
     # draw lines between points
     if len(points) == 4:
@@ -53,7 +44,7 @@ def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
     return points
 
 
-def perspective_transform(image: cv2.Mat, src_points: list, dst_points: list, dst_image_size: tuple[int, int]) -> cv2.Mat:
+def perspective_transform(image, src_points: list, dst_points: list, dst_image_size):
     """
     Apply perspective transformation to the image based on source and destination points.
 
@@ -84,16 +75,16 @@ def select_points(image_path: str):
 
 
 if __name__ == "__main__":
-    car_name = "my"
-    image_path = "test_data/road.jpg"
+    car_name = "my_car"
+    image_path = "my_car/pic0.jpg"
 
     image = cv2.imread(image_path)
-    # image = undistort_image(image)
+    image = undistort_image(image, car_name=car_name)
 
-    selected_points = pick_points_from_image(image_path)
+    selected_points = pick_points_from_image(image)
 
     # dst_image = (520,720)
-    dst_image = (320, 240)
+    dst_image = (450, 200)
     pading = 0
 
     dst_points = [(pading, pading), (dst_image[0]-pading, pading), 
@@ -103,7 +94,7 @@ if __name__ == "__main__":
         image, selected_points, dst_points, dst_image_size=dst_image)
 
     # save the transformation matrix to a npx file
-    np.savez(f"{car_name}/perspective_transform.npz", matrix=trans_matrix)
+    np.savez(f"{car_name}/perspective_transform.npz", matrix=trans_matrix, src_points=selected_points, dst_points=dst_points)
 
     # draw dst points on the transformed image
     for point in dst_points:

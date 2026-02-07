@@ -21,6 +21,63 @@ def build_radius_maps(h: int, w: int) -> Tuple[np.ndarray, np.ndarray]:
     return r2_norm, r4_norm
 
 
+def build_channel_gain_maps(params: Dict[str, float], r2: np.ndarray, r4: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Build per-channel gain maps based on the provided parameters and radius maps.
+    """
+    a = params["a"]
+    b = params["b"]
+    c = params["c"]
+    d = params["d"]
+    e = params["e"]
+    f = params["f"]
+
+    gain_R = 1.0 / (1.0 + a * r2 + b * r4)
+    gain_G = 1.0 / (1.0 + c * r2 + d * r4)
+    gain_B = 1.0 / (1.0 + e * r2 + f * r4)
+
+    # Clip gains to avoid extreme amplification
+    gain_R = np.clip(gain_R, 0.2, 5.0)
+    gain_G = np.clip(gain_G, 0.2, 5.0)
+    gain_B = np.clip(gain_B, 0.2, 5.0)
+
+    return gain_R, gain_G, gain_B
+
+def apply_color_correction(img: np.ndarray, gain_R: np.ndarray, gain_G: np.ndarray, gain_B: np.ndarray) -> np.ndarray:
+    """
+    Apply per-channel gain to the image for color correction.
+    """
+    if img is None:
+        raise ValueError("apply_color_correction: img is None")
+
+    # Normalize to 3-channel BGR for OpenCV ops.
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.ndim == 3 and img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+    elif img.ndim != 3 or img.shape[2] != 3:
+        raise ValueError(f"apply_color_correction: expected HxWx3 BGR, got shape={getattr(img, 'shape', None)}")
+
+    # Force a supported, contiguous dtype before cv2.split().
+    img_f = np.ascontiguousarray(img, dtype=np.float32)
+    img_f *= np.float32(1.0 / 255.0)
+    b, g, r = cv2.split(img_f)
+
+    r_corr = r * gain_R
+    g_corr = g * gain_G
+    b_corr = b * gain_B
+
+    corrected = cv2.merge(
+        [
+            np.clip(b_corr, 0.0, 1.0),
+            np.clip(g_corr, 0.0, 1.0),
+            np.clip(r_corr, 0.0, 1.0),
+        ]
+    )
+
+    corrected_u8 = (corrected * 255.0).astype(np.uint8)
+    return corrected_u8
+
 def apply_color_lens_correction(
     img: np.ndarray,
     params: Dict[str, float],
@@ -34,23 +91,7 @@ def apply_color_lens_correction(
       gain_B = 1 / (1 + e*r^2 + f*r^4)
     Image is assumed BGR (OpenCV default).
     """
-    a = params["a"]
-    b = params["b"]
-    c = params["c"]
-    d = params["d"]
-    e = params["e"]
-    f = params["f"]
-
-    # Compute per-channel gains
-    gain_R = 1.0 / (1.0 + a * r2 + b * r4)
-    gain_G = 1.0 / (1.0 + c * r2 + d * r4)
-    gain_B = 1.0 / (1.0 + e * r2 + f * r4)
-
-    # Clip gains to avoid extreme amplification
-    gain_R = np.clip(gain_R, 0.2, 5.0)
-    gain_G = np.clip(gain_G, 0.2, 5.0)
-    gain_B = np.clip(gain_B, 0.2, 5.0)
-
+    gain_R, gain_G, gain_B = build_channel_gain_maps(params, r2, r4)
     if img is None:
         raise ValueError("apply_color_lens_correction: img is None")
 

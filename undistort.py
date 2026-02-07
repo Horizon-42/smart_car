@@ -11,9 +11,9 @@ with np.load("nayans_car/camera_calibration.npz") as data:
     nayan_dist_coeffs = data['dist']
 
 
-def undistort_image(img: np.ndarray, car_name:str ="my") -> np.ndarray:
+def undistort_image(img: np.ndarray, car_name:str ="my_car") -> np.ndarray:
     h, w = img.shape[:2]
-    if car_name == "my":
+    if car_name == "my_car":
         mtx = my_mtx
         dist_coeffs = my_dist_coeffs
     elif car_name == "nayan":
