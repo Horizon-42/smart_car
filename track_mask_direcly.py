@@ -28,21 +28,19 @@ def get_mask_hsv(frame:np.ndarray, hsv_low_bound=(0, 100, 120), hsv_high_bound=(
     mask = cv2.inRange(hsv_frame, hsv_low_bound, hsv_high_bound)
     return mask
 
+def get_track_mask(frame:np.ndarray, hsv_bound:HSVBoundRealTrack, car_name:str)->np.ndarray:
+    frame = color_correct(frame)
+    undistorted = undistort_image(frame, car_name="nayan")
+    if undistorted.shape != frame.shape:
+        print(f"Warning: Undistorted image shape {undistorted.shape} does not match original frame shape {frame.shape}. Resizing undistorted image.")
+        undistorted = cv2.resize(undistorted, (frame.shape[1], frame.shape[0]))
+    track_mask = get_mask_hsv(undistorted, hsv_bound.track_low, hsv_bound.track_high)
+    return undistorted, track_mask
+
 
 if __name__ == "__main__":
     # HSVBound = HSVBoundWaveShare()
     HSVBound = HSVBoundRealTrack()
-
-    white = (255, 255, 255)
-    white_mat = np.full((100, 100, 3), white, dtype=np.uint8)
-    white_hsv = cv2.cvtColor(white_mat, cv2.COLOR_BGR2HSV)[0,0]
-    print("White in HSV:", white_hsv)
-
-    gray = (100, 100, 100)
-    gray_mat = np.full((100, 100, 3), gray, dtype=np.uint8)
-    gray_hsv = cv2.cvtColor(gray_mat, cv2.COLOR_BGR2HSV)[0,0]
-    print("Gray in HSV:", gray_hsv)
-    # exit(0)
 
     image_folder = "object_detection/data/combined_dataset_640X480/images"
 
@@ -51,11 +49,7 @@ if __name__ == "__main__":
     im_pathes.sort()
     for im_path in im_pathes:
         frame = cv2.imread(im_path)
-        frame = color_correct(frame)
-        undistorted = undistort_image(frame, car_name="nayan")
-        print("undistorted shape:", undistorted.shape)
-        # resize to 640x480
-        undistorted = cv2.resize(undistorted, (640, 480))
+        undistorted, track_mask = get_track_mask(frame, HSVBound, car_name="nayan")
 
         if frame is None:
             print(f"Failed to read image: {im_path}")
