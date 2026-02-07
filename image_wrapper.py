@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from undistort import undistort_image
 import yaml
+from undistort import undistort_image
 
 
 def pick_points_from_image(image_path: str, window_name: str = "Image") -> list:
@@ -69,7 +70,7 @@ def perspective_transform(image: cv2.Mat, src_points: list, dst_points: list, ds
     matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
     transformed_image = cv2.warpPerspective(
         image, matrix, dsize=dst_image_size)
-    return transformed_image
+    return matrix, transformed_image
 
 def select_points(image_path: str):
 
@@ -83,29 +84,26 @@ def select_points(image_path: str):
 
 
 if __name__ == "__main__":
-    image_path = "road/road_000.jpg"  # Replace with your image path
-    image_path = "road_virtual/raw_0000020.png"
-    # select_points(image_path)
-    # load points from yaml file
-    with open("selected_points.yaml", "r") as f:
-        data = yaml.unsafe_load(f)
-    selected_points = data["selected_points"]
-    print("Loaded points:", selected_points)
+    car_name = "my"
+    image_path = "test_data/road.jpg"
 
     image = cv2.imread(image_path)
     # image = undistort_image(image)
 
+    selected_points = pick_points_from_image(image_path)
+
     # dst_image = (520,720)
     dst_image = (320, 240)
-    pading = 10
+    pading = 0
 
     dst_points = [(pading, pading), (dst_image[0]-pading, pading), 
                   (dst_image[0]-pading, dst_image[1]-pading), (pading, dst_image[1]-pading)]
     print("Destination points:", dst_points)
-    transformed_image = perspective_transform(
+    trans_matrix, transformed_image = perspective_transform(
         image, selected_points, dst_points, dst_image_size=dst_image)
 
-    cv2.imwrite("test_data/road_transformed.jpg", transformed_image)
+    # save the transformation matrix to a npx file
+    np.savez(f"{car_name}/perspective_transform.npz", matrix=trans_matrix)
 
     # draw dst points on the transformed image
     for point in dst_points:
