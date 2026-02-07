@@ -16,7 +16,17 @@ const defaultDatasetDir = path.join(
   "signs_labeled"
 );
 
-const datasetDir = path.resolve(process.env.DATASET_DIR || defaultDatasetDir);
+function resolveDatasetDir(datasetParam) {
+  const trimmed =
+    typeof datasetParam === "string" ? datasetParam.trim() : "";
+  if (!trimmed) {
+    return defaultDatasetDir;
+  }
+  if (path.isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return path.resolve(repoRoot, trimmed);
+}
 
 function resolveDirs(dataDir) {
   const imagesDir = path.join(dataDir, "images");
@@ -27,12 +37,28 @@ function resolveDirs(dataDir) {
   return { imagesDir: dataDir, labelsDir: dataDir };
 }
 
-const { imagesDir, labelsDir } = resolveDirs(datasetDir);
-const outputDir = path.resolve(
-  process.env.OUTPUT_DIR || path.join(datasetDir, "labels_edited")
-);
+function getDatasetContext(req, res) {
+  const datasetDir = resolveDatasetDir(req.query.dataset);
+  try {
+    const stats = fs.statSync(datasetDir);
+    if (!stats.isDirectory()) {
+      res.status(400).json({ error: `Dataset is not a directory: ${datasetDir}` });
+      return null;
+    }
+  } catch (error) {
+    res.status(400).json({ error: `Dataset not found: ${datasetDir}` });
+    return null;
+  }
 
-async function listImages() {
+  const { imagesDir, labelsDir } = resolveDirs(datasetDir);
+  const outputDir = path.resolve(
+    process.env.OUTPUT_DIR || path.join(datasetDir, "labels_edited")
+  );
+
+  return { datasetDir, imagesDir, labelsDir, outputDir };
+}
+
+async function listImages(imagesDir) {
   try {
     const entries = await fsp.readdir(imagesDir, { withFileTypes: true });
     return entries
@@ -45,7 +71,7 @@ async function listImages() {
   }
 }
 
-async function listEditedImages(imageNames) {
+async function listEditedImages(imageNames, outputDir) {
   try {
     const entries = await fsp.readdir(outputDir, { withFileTypes: true });
     const editedStems = new Set(
@@ -59,26 +85,30 @@ async function listEditedImages(imageNames) {
   }
 }
 
-async function readClasses(fileName) {
-  const classesPath = path.join(datasetDir, fileName);
-  try {
-    const content = await fsp.readFile(classesPath, "utf-8");
-    return content
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  } catch (error) {
-    return [];
+async function readClasses(datasetDir, fileNames) {
+  const names = Array.isArray(fileNames) ? fileNames : [fileNames];
+  for (const fileName of names) {
+    const classesPath = path.join(datasetDir, fileName);
+    try {
+      const content = await fsp.readFile(classesPath, "utf-8");
+      return content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    } catch (error) {
+      // Keep trying other filenames.
+    }
   }
+  return [];
 }
 
-function labelPathForImage(imageName) {
+function labelPathForImage(imageName, labelsDir) {
   const safeName = path.basename(imageName);
   const stem = path.parse(safeName).name;
   return path.join(labelsDir, `${stem}.txt`);
 }
 
-function outputLabelPathForImage(imageName) {
+function outputLabelPathForImage(imageName, outputDir) {
   const safeName = path.basename(imageName);
   const stem = path.parse(safeName).name;
   return path.join(outputDir, `${stem}.txt`);
@@ -128,15 +158,15 @@ async function parseLabelFile(labelPath) {
   }
 }
 
-async function detectSaveConf(imageNames) {
+async function detectSaveConf(imageNames, labelsDir, outputDir) {
   for (const name of imageNames) {
-    const outputPath = outputLabelPathForImage(name);
+    const outputPath = outputLabelPathForImage(name, outputDir);
     if (fs.existsSync(outputPath)) {
       const { hasConf } = await parseLabelFile(outputPath);
       if (hasConf) return true;
       continue;
     }
-    const labelPath = labelPathForImage(name);
+    const labelPath = labelPathForImage(name, labelsDir);
     if (!fs.existsSync(labelPath)) continue;
     const { hasConf } = await parseLabelFile(labelPath);
     if (hasConf) return true;
@@ -144,21 +174,46 @@ async function detectSaveConf(imageNames) {
   return false;
 }
 
-app.use("/data/images", express.static(imagesDir));
+function imagePathForName(imageName, imagesDir) {
+  const safeName = path.basename(imageName || "");
+  if (!safeName) return null;
+  return path.join(imagesDir, safeName);
+}
 
-app.get("/api/meta", async (_req, res) => {
-  const images = await listImages();
-  const classes = await readClasses("classes.txt");
-  const customClasses = await readClasses("custom_class.txt");
-  const editedImages = await listEditedImages(images);
-  const saveConf = await detectSaveConf(images);
+app.get("/api/image/:imageName", async (req, res) => {
+  const { imageName } = req.params;
+  if (!imageName) {
+    res.status(400).json({ error: "Missing image name" });
+    return;
+  }
+  const context = getDatasetContext(req, res);
+  if (!context) return;
+  const imagePath = imagePathForName(imageName, context.imagesDir);
+  if (!imagePath || !fs.existsSync(imagePath)) {
+    res.status(404).json({ error: "Image not found" });
+    return;
+  }
+  res.sendFile(imagePath);
+});
+
+app.get("/api/meta", async (req, res) => {
+  const context = getDatasetContext(req, res);
+  if (!context) return;
+  const images = await listImages(context.imagesDir);
+  const classes = await readClasses(context.datasetDir, "classes.txt");
+  const customClasses = await readClasses(context.datasetDir, [
+    "custom_classes.txt",
+    "custom_class.txt"
+  ]);
+  const editedImages = await listEditedImages(images, context.outputDir);
+  const saveConf = await detectSaveConf(images, context.labelsDir, context.outputDir);
   res.json({
     images: images.map((name) => ({ name })),
     classes,
     customClasses,
     editedImages,
-    datasetDir,
-    outputDir,
+    datasetDir: context.datasetDir,
+    outputDir: context.outputDir,
     saveConf
   });
 });
@@ -169,13 +224,15 @@ app.get("/api/labels/:imageName", async (req, res) => {
     res.status(400).json({ error: "Missing image name" });
     return;
   }
-  const outputPath = outputLabelPathForImage(imageName);
+  const context = getDatasetContext(req, res);
+  if (!context) return;
+  const outputPath = outputLabelPathForImage(imageName, context.outputDir);
   if (fs.existsSync(outputPath)) {
     const result = await parseLabelFile(outputPath);
     res.json({ boxes: result.boxes, source: "edited" });
     return;
   }
-  const labelPath = labelPathForImage(imageName);
+  const labelPath = labelPathForImage(imageName, context.labelsDir);
   const result = await parseLabelFile(labelPath);
   res.json({ boxes: result.boxes, source: "original" });
 });
@@ -187,7 +244,9 @@ app.post("/api/labels/:imageName", async (req, res) => {
     res.status(400).json({ error: "Missing image name" });
     return;
   }
-  if (path.resolve(outputDir) === path.resolve(labelsDir)) {
+  const context = getDatasetContext(req, res);
+  if (!context) return;
+  if (path.resolve(context.outputDir) === path.resolve(context.labelsDir)) {
     res.status(400).json({ error: "Output directory cannot be the original labels directory." });
     return;
   }
@@ -215,8 +274,8 @@ app.post("/api/labels/:imageName", async (req, res) => {
     return `${classId} ${xCenter.toFixed(6)} ${yCenter.toFixed(6)} ${width.toFixed(6)} ${height.toFixed(6)}`;
   });
 
-  await fsp.mkdir(outputDir, { recursive: true });
-  const outPath = path.join(outputDir, `${stem}.txt`);
+  await fsp.mkdir(context.outputDir, { recursive: true });
+  const outPath = path.join(context.outputDir, `${stem}.txt`);
   await fsp.writeFile(outPath, lines.join("\n"));
   res.json({ ok: true, path: outPath });
 });

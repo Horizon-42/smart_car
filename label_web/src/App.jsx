@@ -49,6 +49,8 @@ export default function App() {
   const [showEditedOnly, setShowEditedOnly] = useState(false);
   const [editedMap, setEditedMap] = useState({});
   const [labelSourceMap, setLabelSourceMap] = useState({});
+  const [datasetInput, setDatasetInput] = useState("");
+  const [activeDataset, setActiveDataset] = useState("");
   const autoSaveTimer = useRef(null);
   const fullIndexRef = useRef(0);
   const fullImageRef = useRef("");
@@ -60,38 +62,85 @@ export default function App() {
   const currentImage = visibleImages[index];
   const currentImageName = currentImage ? currentImage.name : "";
 
+  function withDataset(url) {
+    if (!activeDataset) return url;
+    const joiner = url.includes("?") ? "&" : "?";
+    return `${url}${joiner}dataset=${encodeURIComponent(activeDataset)}`;
+  }
+
+  async function fetchMeta(datasetOverride) {
+    const trimmed =
+      typeof datasetOverride === "string" ? datasetOverride.trim() : "";
+    const query = trimmed ? `?dataset=${encodeURIComponent(trimmed)}` : "";
+    const response = await fetch(`/api/meta${query}`);
+    if (!response.ok) {
+      let message = "Failed to load dataset metadata";
+      try {
+        const data = await response.json();
+        if (data && data.error) {
+          message = data.error;
+        }
+      } catch (error) {
+        // Ignore JSON errors.
+      }
+      throw new Error(message);
+    }
+    return response.json();
+  }
+
+  function applyMeta(data, datasetOverride) {
+    setMeta(data);
+    setActiveDataset(data.datasetDir || "");
+    setDatasetInput(data.datasetDir || datasetOverride || "");
+    if (Array.isArray(data.editedImages)) {
+      const nextEdited = {};
+      data.editedImages.forEach((name) => {
+        nextEdited[name] = true;
+      });
+      setEditedMap(nextEdited);
+    } else {
+      setEditedMap({});
+    }
+    setLabelSourceMap({});
+    setShowEditedOnly(false);
+    fullIndexRef.current = 0;
+    fullImageRef.current = "";
+    setIndex(0);
+    setCurrentClass(0);
+    setBoxes([]);
+    setSelectedIdx(null);
+    setDragBox(null);
+    setStatus(data.images.length ? "" : "No images found.");
+  }
+
   useEffect(() => {
     let active = true;
-    async function loadMeta() {
+    async function loadInitialMeta() {
       try {
-        const response = await fetch("/api/meta");
-        if (!response.ok) {
-          throw new Error("Failed to load dataset metadata");
-        }
-        const data = await response.json();
+        const data = await fetchMeta();
         if (!active) return;
-        setMeta(data);
-        if (Array.isArray(data.editedImages)) {
-          const nextEdited = {};
-          data.editedImages.forEach((name) => {
-            nextEdited[name] = true;
-          });
-          setEditedMap(nextEdited);
-        }
-        setIndex(0);
-        setCurrentClass(0);
-        setStatus(data.images.length ? "" : "No images found.");
+        applyMeta(data, "");
       } catch (error) {
         if (active) {
           setStatus(error.message || "Failed to load dataset.");
         }
       }
     }
-    loadMeta();
+    loadInitialMeta();
     return () => {
       active = false;
     };
   }, []);
+
+  async function loadDataset() {
+    setStatus("Loading dataset...");
+    try {
+      const data = await fetchMeta(datasetInput);
+      applyMeta(data, datasetInput.trim());
+    } catch (error) {
+      setStatus(error.message || "Failed to load dataset.");
+    }
+  }
 
   useEffect(() => {
     if (!currentImageName) {
@@ -111,11 +160,13 @@ export default function App() {
       setImage(null);
       setStatus("Failed to load image.");
     };
-    img.src = `/data/images/${encodeURIComponent(currentImageName)}`;
+    img.src = withDataset(`/api/image/${encodeURIComponent(currentImageName)}`);
 
     async function loadLabels() {
       try {
-        const response = await fetch(`/api/labels/${encodeURIComponent(currentImageName)}`);
+        const response = await fetch(
+          withDataset(`/api/labels/${encodeURIComponent(currentImageName)}`)
+        );
         if (!response.ok) {
           throw new Error("Failed to load labels");
         }
@@ -148,7 +199,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [currentImageName]);
+  }, [currentImageName, activeDataset]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -484,7 +535,7 @@ export default function App() {
     }
     try {
       const payloadBoxes = Array.isArray(boxesOverride) ? boxesOverride : boxes;
-      const response = await fetch(`/api/labels/${encodeURIComponent(targetName)}`, {
+      const response = await fetch(withDataset(`/api/labels/${encodeURIComponent(targetName)}`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ boxes: payloadBoxes, saveConf: meta.saveConf })
@@ -563,6 +614,28 @@ export default function App() {
           </div>
         </section>
         <aside className="side-panel">
+          <div className="section">
+            <div className="section-title">Dataset</div>
+            <div className="row">
+              <input
+                className="input"
+                value={datasetInput}
+                onChange={(event) => setDatasetInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    loadDataset();
+                  }
+                }}
+                placeholder="Path to dataset"
+              />
+            </div>
+            <div className="row">
+              <button className="btn" onClick={loadDataset}>
+                Load
+              </button>
+            </div>
+          </div>
           <div className="section">
             <div className="section-title">Navigation</div>
             <div className="row">
