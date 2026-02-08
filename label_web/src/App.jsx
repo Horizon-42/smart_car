@@ -31,6 +31,71 @@ function colorForClass(classId) {
   return PALETTE[classId % PALETTE.length];
 }
 
+function getInvalidClassInfo(boxes, classCount) {
+  if (!Number.isFinite(classCount) || classCount <= 0) return null;
+  let maxClassId = -Infinity;
+  let invalidCount = 0;
+  for (const box of boxes) {
+    const classId = Number(box.classId);
+    if (Number.isNaN(classId)) continue;
+    if (classId < 0 || classId >= classCount) {
+      invalidCount += 1;
+      if (classId > maxClassId) {
+        maxClassId = classId;
+      }
+    }
+  }
+  if (invalidCount === 0) return null;
+  return {
+    invalidCount,
+    maxClassId,
+    limit: classCount - 1
+  };
+}
+
+function drawAlertBanner(ctx, text) {
+  const paddingX = 10;
+  const paddingY = 6;
+  ctx.save();
+  ctx.font = "bold 14px sans-serif";
+  const maxBoxW = Math.max(0, ctx.canvas.width - 20);
+  if (maxBoxW === 0) {
+    ctx.restore();
+    return;
+  }
+  let textToRender = text;
+  const maxTextWidth = maxBoxW - paddingX * 2;
+  if (maxTextWidth > 0) {
+    const metrics = ctx.measureText(text);
+    if (metrics.width > maxTextWidth) {
+      const ellipsis = "...";
+      let trimmed = text;
+      while (
+        trimmed.length > 0 &&
+        ctx.measureText(trimmed + ellipsis).width > maxTextWidth
+      ) {
+        trimmed = trimmed.slice(0, -1);
+      }
+      textToRender = trimmed ? `${trimmed}${ellipsis}` : ellipsis;
+    }
+  }
+  const metrics = ctx.measureText(textToRender);
+  const textWidth = Math.ceil(metrics.width);
+  const boxW = Math.min(maxBoxW, textWidth + paddingX * 2);
+  const boxH = 26 + paddingY * 0.5;
+  const x = 10;
+  const y = 10;
+  ctx.fillStyle = "rgba(220, 38, 38, 0.9)";
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, boxW, boxH);
+  ctx.fillStyle = "#ffffff";
+  ctx.textBaseline = "top";
+  ctx.fillText(textToRender, x + paddingX, y + paddingY);
+  ctx.restore();
+}
+
 export default function App() {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -51,10 +116,17 @@ export default function App() {
   const [labelSourceMap, setLabelSourceMap] = useState({});
   const [datasetInput, setDatasetInput] = useState("");
   const [activeDataset, setActiveDataset] = useState("");
+  const [datasetAlert, setDatasetAlert] = useState({
+    status: "idle",
+    invalidImages: [],
+    classCount: 0,
+    totalImages: 0
+  });
   const autoSaveTimer = useRef(null);
   const fullIndexRef = useRef(0);
   const fullImageRef = useRef("");
   const dragStartRef = useRef(null);
+  const scanIdRef = useRef(0);
 
   const visibleImages = showEditedOnly
     ? meta.images.filter((item) => editedMap[item.name])
@@ -88,6 +160,44 @@ export default function App() {
     return response.json();
   }
 
+  async function fetchInvalidLabels(datasetOverride) {
+    const trimmed =
+      typeof datasetOverride === "string" ? datasetOverride.trim() : "";
+    const query = trimmed ? `?dataset=${encodeURIComponent(trimmed)}` : "";
+    const response = await fetch(`/api/invalid-labels${query}`);
+    if (!response.ok) {
+      throw new Error("Failed to scan dataset labels");
+    }
+    return response.json();
+  }
+
+  async function loadInvalidLabels(datasetOverride) {
+    const scanId = scanIdRef.current + 1;
+    scanIdRef.current = scanId;
+    setDatasetAlert((prev) => ({
+      ...prev,
+      status: "loading"
+    }));
+    try {
+      const data = await fetchInvalidLabels(datasetOverride);
+      if (scanIdRef.current !== scanId) return;
+      setDatasetAlert({
+        status: "ready",
+        invalidImages: Array.isArray(data.invalidImages) ? data.invalidImages : [],
+        classCount: Number.isFinite(data.classCount) ? data.classCount : 0,
+        totalImages: Number.isFinite(data.totalImages) ? data.totalImages : 0
+      });
+    } catch (error) {
+      if (scanIdRef.current !== scanId) return;
+      setDatasetAlert({
+        status: "error",
+        invalidImages: [],
+        classCount: 0,
+        totalImages: 0
+      });
+    }
+  }
+
   function applyMeta(data, datasetOverride) {
     setMeta(data);
     setActiveDataset(data.datasetDir || "");
@@ -111,6 +221,7 @@ export default function App() {
     setSelectedIdx(null);
     setDragBox(null);
     setStatus(data.images.length ? "" : "No images found.");
+    loadInvalidLabels(data.datasetDir || datasetOverride || "");
   }
 
   useEffect(() => {
@@ -347,6 +458,17 @@ export default function App() {
       ctx.font = "12px sans-serif";
       ctx.fillText(`${className}${confText}`, x1 + 4, y1 + 12);
     });
+
+    const invalidInfo = getInvalidClassInfo(boxes, meta.classes.length);
+    if (invalidInfo) {
+      const datasetIndex =
+        meta.images.findIndex((item) => item.name === currentImageName) + 1;
+      const imageIndex = datasetIndex > 0 ? datasetIndex : index + 1;
+      drawAlertBanner(
+        ctx,
+        `Image ${imageIndex}: label index exceeds classes.txt (max ${invalidInfo.maxClassId}, limit ${invalidInfo.limit})`
+      );
+    }
 
     if (dragBox) {
       const x1 = offsetX + dragBox.x1 * imageSize.w * scale;
@@ -589,6 +711,29 @@ export default function App() {
     setIndex(fullIdx >= 0 ? fullIdx : 0);
   }
 
+  const invalidInfo = getInvalidClassInfo(boxes, meta.classes.length);
+  const datasetHasWarning =
+    datasetAlert.classCount > 0 && datasetAlert.invalidImages.length > 0;
+  const datasetIndices = datasetAlert.invalidImages
+    .map((item) => item.index)
+    .filter((value) => Number.isFinite(value));
+  const datasetIndicesPreview = datasetIndices.slice(0, 12).join(", ");
+  const datasetIndicesMore =
+    datasetIndices.length > 12 ? datasetIndices.length - 12 : 0;
+  const datasetMaxFound = datasetAlert.invalidImages.reduce((max, item) => {
+    const value = Number(item.maxClassId);
+    if (Number.isNaN(value)) return max;
+    return Math.max(max, value);
+  }, -Infinity);
+  const datasetLimit = datasetAlert.classCount - 1;
+  const datasetWarningText = datasetHasWarning
+    ? `classes.txt max is ${datasetLimit}, but ${datasetAlert.invalidImages.length} image(s) exceed it${
+        Number.isFinite(datasetMaxFound) ? ` (max found ${datasetMaxFound})` : ""
+      }. Dataset indices: ${datasetIndicesPreview}${
+        datasetIndicesMore ? ` (+${datasetIndicesMore} more)` : ""
+      }.`
+    : "";
+
   return (
     <div className="app">
       <header className="header">
@@ -598,6 +743,12 @@ export default function App() {
           <span>{meta.outputDir ? `Output: ${meta.outputDir}` : ""}</span>
         </div>
       </header>
+      {datasetHasWarning && (
+        <div className="global-alert" role="alert">
+          <span className="global-alert-title">Dataset warning</span>
+          <span>{datasetWarningText}</span>
+        </div>
+      )}
       <div className="content">
         <section className="canvas-panel" ref={containerRef}>
           <canvas

@@ -56,6 +56,27 @@ body {
   text-align: right;
 }
 
+.global-alert {
+  margin: 12px 20px 0;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #ef4444;
+  background: #fee2e2;
+  color: #991b1b;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 18px rgba(239, 68, 68, 0.12);
+}
+
+.global-alert-title {
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-size: 11px;
+}
+
 .content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;

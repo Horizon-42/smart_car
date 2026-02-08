@@ -158,6 +158,52 @@ async function parseLabelFile(labelPath) {
   }
 }
 
+function resolveLabelPath(imageName, labelsDir, outputDir) {
+  const outputPath = outputLabelPathForImage(imageName, outputDir);
+  if (fs.existsSync(outputPath)) {
+    return outputPath;
+  }
+  const labelPath = labelPathForImage(imageName, labelsDir);
+  if (fs.existsSync(labelPath)) {
+    return labelPath;
+  }
+  return null;
+}
+
+async function scanInvalidLabels(imageNames, labelsDir, outputDir, classCount) {
+  if (!Number.isFinite(classCount) || classCount <= 0) {
+    return [];
+  }
+  const invalidImages = [];
+  for (let i = 0; i < imageNames.length; i += 1) {
+    const name = imageNames[i];
+    const labelPath = resolveLabelPath(name, labelsDir, outputDir);
+    if (!labelPath) continue;
+    const { boxes } = await parseLabelFile(labelPath);
+    let maxClassId = -Infinity;
+    let invalidCount = 0;
+    for (const box of boxes) {
+      const classId = Number(box.classId);
+      if (Number.isNaN(classId)) continue;
+      if (classId < 0 || classId >= classCount) {
+        invalidCount += 1;
+        if (classId > maxClassId) {
+          maxClassId = classId;
+        }
+      }
+    }
+    if (invalidCount > 0) {
+      invalidImages.push({
+        name,
+        index: i + 1,
+        invalidCount,
+        maxClassId
+      });
+    }
+  }
+  return invalidImages;
+}
+
 async function detectSaveConf(imageNames, labelsDir, outputDir) {
   for (const name of imageNames) {
     const outputPath = outputLabelPathForImage(name, outputDir);
@@ -215,6 +261,24 @@ app.get("/api/meta", async (req, res) => {
     datasetDir: context.datasetDir,
     outputDir: context.outputDir,
     saveConf
+  });
+});
+
+app.get("/api/invalid-labels", async (req, res) => {
+  const context = getDatasetContext(req, res);
+  if (!context) return;
+  const images = await listImages(context.imagesDir);
+  const classes = await readClasses(context.datasetDir, "classes.txt");
+  const invalidImages = await scanInvalidLabels(
+    images,
+    context.labelsDir,
+    context.outputDir,
+    classes.length
+  );
+  res.json({
+    totalImages: images.length,
+    classCount: classes.length,
+    invalidImages
   });
 });
 
