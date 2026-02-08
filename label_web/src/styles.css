@@ -199,7 +199,7 @@ body {
 
 .box-row {
   display: grid;
-  grid-template-columns: 28px 1fr 40px;
+  grid-template-columns: 28px 1fr auto auto;
   gap: 8px;
   align-items: center;
   border: 1px solid transparent;
@@ -222,6 +222,12 @@ body {
 .small {
   font-size: 12px;
   color: var(--ink-soft);
+}
+
+.box-conf,
+.box-area {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .tip {

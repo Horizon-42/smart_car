@@ -423,6 +423,16 @@ export default function App() {
     return `class_${classId}`;
   }
 
+  function getBoxAreaStats(box) {
+    const x1 = clamp01(Math.min(box.x1, box.x2));
+    const x2 = clamp01(Math.max(box.x1, box.x2));
+    const y1 = clamp01(Math.min(box.y1, box.y2));
+    const y2 = clamp01(Math.max(box.y1, box.y2));
+    const ratioArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const pixelArea = ratioArea * imageSize.w * imageSize.h;
+    return { ratioArea, pixelArea };
+  }
+
   function drawCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -856,12 +866,14 @@ export default function App() {
             <div className="section-title">Boxes</div>
             <div className="box-list">
               {boxes.length === 0 && <div className="empty">No boxes</div>}
-                {boxes.map((box, idx) => {
+              {boxes.map((box, idx) => {
                 const name = labelNameFor(box);
                 const confText =
                   meta.saveConf && typeof box.conf === "number"
                     ? ` ${box.conf.toFixed(2)}`
                     : "";
+                const { ratioArea, pixelArea } = getBoxAreaStats(box);
+                const areaText = `${Math.round(pixelArea)} px^2 · ${ratioArea.toFixed(4)}`;
                 return (
                   <button
                     key={`${idx}-${name}`}
@@ -873,7 +885,8 @@ export default function App() {
                   >
                     <span>{idx + 1}.</span>
                     <span>{name}</span>
-                    <span className="small">{confText}</span>
+                    <span className="small box-conf">{confText}</span>
+                    <span className="small box-area">{areaText}</span>
                   </button>
                 );
               })}
